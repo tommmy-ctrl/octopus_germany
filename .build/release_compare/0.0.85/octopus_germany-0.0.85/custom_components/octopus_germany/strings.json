@@ -36,9 +36,8 @@
         "title": "Octopus Germany Options",
         "description": "Configure Octopus Germany integration",
         "data": {
-          "update_interval": "Polling interval in minutes",
-          "smart_meter_probe": "Fetch smart meter interval data during updates",
-          "debug_mode": "Enable extra debug diagnostics"
+          "email": "Email",
+          "password": "Password"
         }
       }
     }

@@ -30,14 +30,15 @@
     }
   },
   "options": {
+    "error": {
+      "invalid_auth": "E-Mail oder Passwort sind ung\u00fcltig."
+    },
     "step": {
       "init": {
-        "title": "Octopus Energy Germany",
-        "description": "Laufzeitverhalten der Integration konfigurieren.",
+        "title": "Octopus Energy Germany.",
         "data": {
-          "update_interval": "Aktualisierungsintervall in Minuten",
-          "smart_meter_probe": "Smart-Meter-Intervallwerte waehrend Updates abrufen",
-          "debug_mode": "Zusaetzliche Debug-Diagnose aktivieren"
+          "email": "E-Mail",
+          "password": "Passwort"
         }
       }
     }

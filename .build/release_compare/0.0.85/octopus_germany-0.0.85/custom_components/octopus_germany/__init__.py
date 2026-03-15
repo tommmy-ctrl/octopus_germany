@@ -15,17 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util.dt import utcnow, as_utc, parse_datetime
 
-from .const import (
-    CONF_DEBUG_MODE,
-    CONF_EMAIL,
-    CONF_PASSWORD,
-    CONF_SMART_METER_PROBE,
-    CONF_UPDATE_INTERVAL,
-    DEFAULT_DEBUG_MODE,
-    DEFAULT_SMART_METER_PROBE,
-    DEFAULT_UPDATE_INTERVAL,
-    DOMAIN,
-)
+from .const import DOMAIN, CONF_EMAIL, CONF_PASSWORD, UPDATE_INTERVAL, DEBUG_ENABLED
 from .octopus_germany import OctopusGermany
 
 import voluptuous as vol
@@ -35,8 +25,6 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import aiohttp
 
 _LOGGER = logging.getLogger(__name__)
-
-_LOGGED_PRODUCT_WARNINGS: set[str] = set()
 
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH]
 
@@ -62,40 +50,13 @@ ATTR_GO_WINDOW_START = "go_window_start"
 ATTR_GO_WINDOW_END = "go_window_end"
 
 
-def _get_runtime_options(entry: ConfigEntry) -> dict[str, bool | int]:
-    """Return runtime options merged from config data and options."""
-    return {
-        CONF_UPDATE_INTERVAL: int(
-            entry.options.get(
-                CONF_UPDATE_INTERVAL,
-                entry.data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
-            )
-        ),
-        CONF_DEBUG_MODE: bool(
-            entry.options.get(
-                CONF_DEBUG_MODE,
-                entry.data.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE),
-            )
-        ),
-        CONF_SMART_METER_PROBE: bool(
-            entry.options.get(
-                CONF_SMART_METER_PROBE,
-                entry.data.get(CONF_SMART_METER_PROBE, DEFAULT_SMART_METER_PROBE),
-            )
-        ),
-    }
-
-
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Octopus Germany from a config entry."""
     email = entry.data["email"]
     password = entry.data["password"]
-    runtime_options = _get_runtime_options(entry)
-    update_interval = int(runtime_options[CONF_UPDATE_INTERVAL])
-    debug_enabled = bool(runtime_options[CONF_DEBUG_MODE])
 
     # Initialize API
-    api = OctopusGermany(email, password, runtime_options=runtime_options)
+    api = OctopusGermany(email, password)
 
     # Log in only once and reuse the token through the global token manager
     if not await api.login():
@@ -145,18 +106,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Store last successful API call time on the function object
         if not hasattr(async_update_data, "last_api_call"):
             async_update_data.last_api_call = datetime.now() - timedelta(
-                minutes=update_interval
+                minutes=UPDATE_INTERVAL
             )
 
         # Calculate time since last API call
         time_since_last_call = (
             current_time - async_update_data.last_api_call
         ).total_seconds()
-        min_interval = update_interval * 60 * 0.9  # 90% of the update interval in seconds
+        min_interval = (
+            UPDATE_INTERVAL * 60 * 0.9
+        )  # 90% of the update interval in seconds
 
         # Get simplified caller information instead of full stack trace
         caller_info = "Unknown caller"
-        if debug_enabled:
+        if DEBUG_ENABLED:
             # Get the caller's frame (2 frames up from current)
             try:
                 frame = inspect.currentframe()
@@ -179,7 +142,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.debug(
             "Coordinator update called at %s (Update interval: %s minutes, Time since last API call: %.1f seconds, Caller: %s)",
             current_time.strftime("%H:%M:%S"),
-            update_interval,
+            UPDATE_INTERVAL,
             time_since_last_call,
             caller_info,
         )
@@ -732,20 +695,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     product.get("grossRate"),
                 )
         else:
-            if account_number not in _LOGGED_PRODUCT_WARNINGS:
-                _LOGGER.warning(
-                    "No electricity products found for account %s; using cached tariff data if available",
-                    account_number,
-                )
-                _LOGGED_PRODUCT_WARNINGS.add(account_number)
-            cached_products = cached_account.get("products", [])
-            if cached_products:
-                _LOGGER.debug(
-                    "Using cached electricity products for account %s (%d entries)",
-                    account_number,
-                    len(cached_products),
-                )
-                products = cached_products
+            _LOGGER.warning("No products found for account %s", account_number)
+            # Add a test product so we at least get a sensor for testing
+            products.append(
+                {
+                    "code": "TEST_PRODUCT",
+                    "description": "Test Product for debugging",
+                    "name": "Test Product",
+                    "grossRate": "30",  # 30 cents as a reasonable default
+                    "type": "Simple",
+                    "validFrom": None,
+                    "validTo": None,
+                    "isTimeOfUse": False,
+                }
+            )
 
         result_data[account_number]["products"] = products
 
@@ -950,20 +913,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 gas_contract_start = current_gas_product.get("validFrom")
                 gas_contract_end = current_gas_product.get("validTo")
 
-        if not gas_products:
-            cached_gas_products = cached_account.get("gas_products", [])
-            if cached_gas_products:
-                _LOGGER.debug(
-                    "Using cached gas products for account %s (%d entries)",
-                    account_number,
-                    len(cached_gas_products),
-                )
-                gas_products = cached_gas_products
-                gas_price = cached_account.get("gas_price")
-                gas_contract_start = cached_account.get("gas_contract_start")
-                gas_contract_end = cached_account.get("gas_contract_end")
-
-        result_data[account_number]["gas_products"] = gas_products
         result_data[account_number]["gas_price"] = gas_price
         result_data[account_number]["gas_contract_start"] = gas_contract_start
         result_data[account_number]["gas_contract_end"] = gas_contract_end
@@ -1028,8 +977,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     str(e),
                 )
 
-        if gas_latest_reading is None:
-            gas_latest_reading = cached_account.get("gas_latest_reading")
         result_data[account_number]["gas_latest_reading"] = gas_latest_reading
 
         # Fetch latest electricity meter reading if electricity meter exists
@@ -1066,10 +1013,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     str(e),
                 )
 
-        if electricity_latest_reading is None:
-            electricity_latest_reading = cached_account.get(
-                "electricity_latest_reading"
-            )
         result_data[account_number]["electricity_latest_reading"] = (
             electricity_latest_reading
         )
@@ -1078,20 +1021,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         electricity_smart_meter_readings = data.get(
             "electricity_smart_meter_readings", []
         )
-        if not electricity_smart_meter_readings:
-            electricity_smart_meter_readings = cached_account.get(
-                "electricity_smart_meter_readings", []
-            )
         result_data[account_number]["electricity_smart_meter_readings"] = (
             electricity_smart_meter_readings
-        )
-        result_data[account_number]["electricity_smart_meter_readings_date"] = data.get(
-            "electricity_smart_meter_readings_date",
-            cached_account.get("electricity_smart_meter_readings_date"),
-        )
-        result_data[account_number]["electricity_smart_meter_readings_label"] = data.get(
-            "electricity_smart_meter_readings_label",
-            cached_account.get("electricity_smart_meter_readings_label"),
         )
 
         if electricity_smart_meter_readings:
@@ -1108,7 +1039,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER,
         name=f"{DOMAIN}_{primary_account_number}",
         update_method=async_update_data,
-        update_interval=timedelta(minutes=update_interval),
+        update_interval=timedelta(minutes=UPDATE_INTERVAL),
     )
 
     # Initial data refresh - only once to prevent duplicate API calls
@@ -1139,7 +1070,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "account_number": primary_account_number,
         "account_numbers": account_numbers,
         "coordinator": coordinator,
-        "runtime_options": runtime_options,
     }
 
     # Register account service devices before setting up platforms

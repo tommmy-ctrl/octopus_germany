@@ -6,17 +6,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 
-from .const import (
-    CONF_DEBUG_MODE,
-    CONF_EMAIL,
-    CONF_PASSWORD,
-    CONF_SMART_METER_PROBE,
-    CONF_UPDATE_INTERVAL,
-    DEFAULT_DEBUG_MODE,
-    DEFAULT_SMART_METER_PROBE,
-    DEFAULT_UPDATE_INTERVAL,
-    DOMAIN,
-)
+from .const import CONF_EMAIL, CONF_PASSWORD, DOMAIN
 from .octopus_germany import OctopusGermany
 
 _LOGGER = logging.getLogger(__name__)
@@ -56,7 +46,7 @@ class OctopusGermanyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     def async_get_options_flow(config_entry):
         """Get the options flow for this handler."""
-        return OctopusGermanyOptionsFlow(config_entry)
+        return OctopusGermanyOptionsFlow()
 
     async def async_step_user(self, user_input: dict | None = None):
         """Handle the initial step."""
@@ -71,9 +61,6 @@ class OctopusGermanyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
             if valid:
-                await self.async_set_unique_id(email)
-                self._abort_if_unique_id_configured()
-
                 # Store the complete account data in user_input
                 user_input["account_data"] = account_data
                 return self.async_create_entry(
@@ -161,41 +148,50 @@ class OctopusGermanyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class OctopusGermanyOptionsFlow(config_entries.OptionsFlow):
     """Handle an options flow for Octopus Germany."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
-
     async def async_step_init(self, user_input: dict | None = None):
         """Manage the options."""
-        if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+        errors = {}
 
-        current_update_interval = self.config_entry.options.get(
-            CONF_UPDATE_INTERVAL,
-            self.config_entry.data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
-        )
-        current_debug_mode = self.config_entry.options.get(
-            CONF_DEBUG_MODE,
-            self.config_entry.data.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE),
-        )
-        current_smart_meter_probe = self.config_entry.options.get(
-            CONF_SMART_METER_PROBE,
-            self.config_entry.data.get(
-                CONF_SMART_METER_PROBE, DEFAULT_SMART_METER_PROBE
-            ),
-        )
+        if user_input is not None:
+            email = user_input[CONF_EMAIL]
+            password = user_input[CONF_PASSWORD]
+
+            # Validate the new credentials
+            valid, error, account_data = await validate_credentials(
+                self.hass, email, password
+            )
+
+            if valid:
+                # Update the config entry with new credentials
+                new_data = {
+                    **self.config_entry.data,
+                    CONF_EMAIL: email,
+                    CONF_PASSWORD: password,
+                }
+                if account_data:
+                    new_data["account_data"] = account_data
+
+                # Update the entry
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry, data=new_data, title=f"Octopus Germany ({email})"
+                )
+
+                # Return updated options (empty since we store in data)
+                return self.async_create_entry(title="", data={})
+
+            if error:
+                errors["base"] = error
+
+        # Pre-populate with current credentials
+        current_email = self.config_entry.data.get(CONF_EMAIL, "")
 
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
-                    vol.Required(
-                        CONF_UPDATE_INTERVAL, default=current_update_interval
-                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=60)),
-                    vol.Required(
-                        CONF_SMART_METER_PROBE, default=current_smart_meter_probe
-                    ): bool,
-                    vol.Required(CONF_DEBUG_MODE, default=current_debug_mode): bool,
+                    vol.Required(CONF_EMAIL, default=current_email): str,
+                    vol.Required(CONF_PASSWORD): str,
                 }
             ),
+            errors=errors,
         )

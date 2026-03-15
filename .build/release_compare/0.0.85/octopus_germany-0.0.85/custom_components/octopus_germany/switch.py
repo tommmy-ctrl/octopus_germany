@@ -14,7 +14,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.const import STATE_ON, STATE_OFF, STATE_UNKNOWN
 
-from .const import DOMAIN
+from .const import DOMAIN, UPDATE_INTERVAL
 from .sensor import get_account_device_info
 
 _LOGGER = logging.getLogger(__name__)

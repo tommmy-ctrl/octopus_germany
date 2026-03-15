@@ -12,13 +12,7 @@ import asyncio
 import jwt
 from homeassistant.exceptions import ConfigEntryNotReady
 from python_graphql_client import GraphqlClient
-from .const import (
-    DEFAULT_DEBUG_MODE,
-    DEFAULT_SMART_METER_PROBE,
-    EXPLORE_SCHEMA_ONCE,
-    TOKEN_AUTO_REFRESH_INTERVAL,
-    TOKEN_REFRESH_MARGIN,
-)
+from .const import TOKEN_AUTO_REFRESH_INTERVAL, TOKEN_REFRESH_MARGIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,7 +22,6 @@ ELECTRICITY_LEDGER = "ELECTRICITY_LEDGER"
 # Global dictionary to store token managers for each account (email)
 # This prevents redundant logins while supporting multiple accounts
 _TOKEN_MANAGERS = {}
-_LOGGED_SMART_METER_WARNINGS: set[tuple[str, str]] = set()
 
 # Comprehensive query that gets all data in one go
 COMPREHENSIVE_QUERY = """
@@ -789,12 +782,7 @@ class TokenManager:
 
 
 class OctopusGermany:
-    def __init__(
-        self,
-        email: str,
-        password: str,
-        runtime_options: dict[str, bool | int] | None = None,
-    ):
+    def __init__(self, email: str, password: str):
         """Initialize the OctopusGermany API client.
 
         Args:
@@ -803,16 +791,6 @@ class OctopusGermany:
         """
         self._email = email
         self._password = password
-        self._runtime_options = runtime_options or {}
-        self._debug_enabled = bool(
-            self._runtime_options.get("debug_mode", DEFAULT_DEBUG_MODE)
-        )
-        self._smart_meter_probe = bool(
-            self._runtime_options.get(
-                "smart_meter_probe", DEFAULT_SMART_METER_PROBE
-            )
-        )
-        self._explore_schema_once = bool(EXPLORE_SCHEMA_ONCE and self._debug_enabled)
 
         # Use shared token manager for this email to prevent redundant login attempts
         global _TOKEN_MANAGERS
@@ -845,18 +823,6 @@ class OctopusGermany:
         if additional_headers:
             headers.update(additional_headers)
         return GraphqlClient(endpoint=GRAPH_QL_ENDPOINT, headers=headers)
-
-    def _log_smart_meter_unavailable_once(
-        self, account_number: str, property_id: str, message: str, *args: Any
-    ) -> None:
-        """Log missing smart meter data once per account/property combination."""
-        warning_key = (account_number, property_id)
-        if warning_key in _LOGGED_SMART_METER_WARNINGS:
-            _LOGGER.debug(message, *args)
-            return
-
-        _LOGGED_SMART_METER_WARNINGS.add(warning_key)
-        _LOGGER.warning(message, *args)
 
     async def login(self) -> bool:
         """Login and obtain a new token."""
@@ -1369,30 +1335,10 @@ class OctopusGermany:
                         property_id = property_data.get("id")
 
                         if property_id:
-                            if not self._smart_meter_probe:
-                                _LOGGER.debug(
-                                    "Skipping smart meter interval fetch for property %s because smart_meter_probe is disabled",
-                                    property_id,
-                                )
-                                return result
-
-                            electricity_malos = property_data.get("electricityMalos", [])
-                            smart_meter_expected = any(
-                                (
-                                    malo.get("meter", {}) or {}
-                                ).get("shouldReceiveSmartMeterData")
-                                for malo in electricity_malos
-                            )
-
-                            if electricity_malos and not smart_meter_expected:
-                                _LOGGER.debug(
-                                    "Skipping smart meter interval fetch for property %s because Octopus reports no smart meter data support",
-                                    property_id,
-                                )
-                                return result
-
                             # First, explore the property schema to understand available data (only once)
-                            if self._explore_schema_once and not hasattr(
+                            from .const import EXPLORE_SCHEMA_ONCE
+
+                            if EXPLORE_SCHEMA_ONCE and not hasattr(
                                 self, "_schema_explored"
                             ):
                                 _LOGGER.info(
@@ -1425,8 +1371,8 @@ class OctopusGermany:
                                 (month_ago.isoformat(), "month_ago"),
                             ]
 
-                            _LOGGER.debug(
-                                "Testing smart meter readings for dates: %s",
+                            _LOGGER.info(
+                                "Testing smart meter readings for multiple dates: %s",
                                 [
                                     f"{label} ({date_str})"
                                     for date_str, label in test_dates
@@ -1479,15 +1425,12 @@ class OctopusGermany:
                                     successful_date[1]
                                 )
                             else:
-                                self._log_smart_meter_unavailable_once(
-                                    account_number,
-                                    property_id,
-                                    "No smart meter readings found for property %s across all tested dates",
-                                    property_id,
+                                _LOGGER.warning(
+                                    "No smart meter readings found for any tested date"
                                 )
 
                                 # Try V2 query with yesterday's date as fallback
-                                _LOGGER.debug(
+                                _LOGGER.info(
                                     "Trying V2 query with yesterday's date as fallback"
                                 )
                                 smart_meter_readings_v2 = await self.fetch_electricity_smart_meter_readings_v2(
@@ -1509,14 +1452,11 @@ class OctopusGermany:
                                         len(smart_meter_readings_v2),
                                     )
                                 else:
-                                    self._log_smart_meter_unavailable_once(
-                                        account_number,
-                                        property_id,
-                                        "No smart meter readings available for property %s with current queries; keeping entity unavailable",
-                                        property_id,
+                                    _LOGGER.warning(
+                                        "No smart meter readings available with any query or date - checking property structure"
                                     )
                                     # Log the entire property structure for debugging
-                                    _LOGGER.debug(
+                                    _LOGGER.info(
                                         "Property data structure: %s",
                                         json.dumps(property_data, indent=2),
                                     )
@@ -2404,14 +2344,14 @@ class OctopusGermany:
                             )
                             return readings
                         else:
-                            _LOGGER.debug(
+                            _LOGGER.warning(
                                 "No smart meter readings found in measurements for property %s on %s",
                                 property_id,
                                 date,
                             )
                             return []
                     else:
-                        _LOGGER.debug(
+                        _LOGGER.warning(
                             "No measurements data found for property %s on %s",
                             property_id,
                             date,

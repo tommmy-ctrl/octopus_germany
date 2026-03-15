@@ -30,14 +30,15 @@
     }
   },
   "options": {
+    "error": {
+      "invalid_auth": "Email or password are invalid."
+    },
     "step": {
       "init": {
-        "title": "Octopus Energy Germany",
-        "description": "Configure runtime behavior for the integration.",
+        "title": "Octopus Energy Germany.",
         "data": {
-          "update_interval": "Polling interval in minutes",
-          "smart_meter_probe": "Fetch smart meter interval data during updates",
-          "debug_mode": "Enable extra debug diagnostics"
+          "email": "Email",
+          "password": "Password"
         }
       }
     }
