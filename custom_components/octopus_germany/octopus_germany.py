@@ -187,12 +187,6 @@ query ComprehensiveDataQuery($accountNumber: String!) {
       current
       currentState
       isSuspended
-      testDispatchFailureReason
-      stateOfChargeLimit {
-        upperSocLimit
-        timestamp
-        isLimitViolated
-      }
     }
     provider
     preferences {
@@ -292,6 +286,17 @@ query ComprehensiveDataQuery($accountNumber: String!) {
       }
     }
     ... on SmartFlexChargePoint {
+      status {
+        current
+        currentState
+        isSuspended
+        testDispatchFailureReason
+        stateOfChargeLimit {
+          upperSocLimit
+          timestamp
+          isLimitViolated
+        }
+      }
       chargingSessions(first: 100) {
         edges {
           node {
