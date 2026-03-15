@@ -241,6 +241,8 @@ query ComprehensiveDataQuery($accountNumber: String!) {
           node {
             start
             end
+            stateOfChargeChange
+            stateOfChargeFinal
             energyAdded {
               value
               unit
@@ -251,6 +253,23 @@ query ComprehensiveDataQuery($accountNumber: String!) {
             }
             ... on SmartFlexChargingSession {
               type
+              targetType
+              dispatches {
+                start
+                end
+                type
+              }
+              problems {
+                __typename
+                ... on SmartFlexChargingError {
+                  cause
+                }
+                ... on SmartFlexChargingTruncation {
+                  truncationCause
+                  originalAchievableStateOfCharge
+                  achievableStateOfCharge
+                }
+              }
             }
           }
         }
@@ -266,6 +285,8 @@ query ComprehensiveDataQuery($accountNumber: String!) {
           node {
             start
             end
+            stateOfChargeChange
+            stateOfChargeFinal
             energyAdded {
               value
               unit
@@ -276,6 +297,23 @@ query ComprehensiveDataQuery($accountNumber: String!) {
             }
             ... on SmartFlexChargingSession {
               type
+              targetType
+              dispatches {
+                start
+                end
+                type
+              }
+              problems {
+                __typename
+                ... on SmartFlexChargingError {
+                  cause
+                }
+                ... on SmartFlexChargingTruncation {
+                  truncationCause
+                  originalAchievableStateOfCharge
+                  achievableStateOfCharge
+                }
+              }
             }
           }
         }
@@ -611,6 +649,8 @@ query ChargingSessions($accountNumber: String!) {
           node {
             start
             end
+            stateOfChargeChange
+            stateOfChargeFinal
             energyAdded {
               value
               unit
@@ -621,6 +661,23 @@ query ChargingSessions($accountNumber: String!) {
             }
             ... on SmartFlexChargingSession {
               type
+              targetType
+              dispatches {
+                start
+                end
+                type
+              }
+              problems {
+                __typename
+                ... on SmartFlexChargingError {
+                  cause
+                }
+                ... on SmartFlexChargingTruncation {
+                  truncationCause
+                  originalAchievableStateOfCharge
+                  achievableStateOfCharge
+                }
+              }
             }
           }
         }
@@ -636,6 +693,8 @@ query ChargingSessions($accountNumber: String!) {
           node {
             start
             end
+            stateOfChargeChange
+            stateOfChargeFinal
             energyAdded {
               value
               unit
@@ -646,6 +705,23 @@ query ChargingSessions($accountNumber: String!) {
             }
             ... on SmartFlexChargingSession {
               type
+              targetType
+              dispatches {
+                start
+                end
+                type
+              }
+              problems {
+                __typename
+                ... on SmartFlexChargingError {
+                  cause
+                }
+                ... on SmartFlexChargingTruncation {
+                  truncationCause
+                  originalAchievableStateOfCharge
+                  achievableStateOfCharge
+                }
+              }
             }
           }
         }
@@ -857,6 +933,58 @@ class OctopusGermany:
 
         _LOGGED_SMART_METER_WARNINGS.add(warning_key)
         _LOGGER.warning(message, *args)
+
+    def _normalize_charging_session(
+        self, session: dict[str, Any], device_id: str, device_name: str, device_type: str
+    ) -> dict[str, Any]:
+        """Normalize charging session data and derive diagnostic fields."""
+        normalized_session = dict(session)
+        normalized_session["device_id"] = device_id
+        normalized_session["device_name"] = device_name
+        normalized_session["device_type"] = device_type
+
+        dispatches = normalized_session.get("dispatches") or []
+        problems = normalized_session.get("problems") or []
+        energy = normalized_session.get("energyAdded") or {}
+
+        normalized_session["dispatches_utilized"] = bool(dispatches)
+        normalized_session["has_ended"] = normalized_session.get("end") is not None
+        normalized_session["has_energy"] = float(energy.get("value", 0) or 0) > 0
+        normalized_session["state_of_charge_change"] = normalized_session.get(
+            "stateOfChargeChange"
+        )
+        normalized_session["state_of_charge_final"] = normalized_session.get(
+            "stateOfChargeFinal"
+        )
+        normalized_session["soc_final"] = normalized_session.get("stateOfChargeFinal")
+        normalized_session["has_error"] = False
+        normalized_session["has_truncation"] = False
+        normalized_session["error_cause"] = None
+        normalized_session["truncation_cause"] = None
+        normalized_session["achievable_soc"] = None
+        normalized_session["original_achievable_soc"] = None
+
+        for problem in problems:
+            if not isinstance(problem, dict):
+                continue
+
+            problem_type = problem.get("__typename")
+            if problem_type == "SmartFlexChargingError":
+                normalized_session["has_error"] = True
+                normalized_session["error_cause"] = problem.get("cause")
+            elif problem_type == "SmartFlexChargingTruncation":
+                normalized_session["has_truncation"] = True
+                normalized_session["truncation_cause"] = problem.get(
+                    "truncationCause"
+                )
+                normalized_session["achievable_soc"] = problem.get(
+                    "achievableStateOfCharge"
+                )
+                normalized_session["original_achievable_soc"] = problem.get(
+                    "originalAchievableStateOfCharge"
+                )
+
+        return normalized_session
 
     async def login(self) -> bool:
         """Login and obtain a new token."""
@@ -1191,11 +1319,14 @@ class OctopusGermany:
                                 for edge in edges:
                                     session = edge.get("node", {})
                                     if session:
-                                        # Add device context to session
-                                        session["device_id"] = device_id
-                                        session["device_name"] = device_name
-                                        session["device_type"] = device_type
-                                        charging_sessions.append(session)
+                                        charging_sessions.append(
+                                            self._normalize_charging_session(
+                                                session,
+                                                device_id,
+                                                device_name,
+                                                device_type,
+                                            )
+                                        )
 
                     # Store charging sessions in result
                     result["charging_sessions"] = charging_sessions
@@ -1600,11 +1731,14 @@ class OctopusGermany:
                         for edge in edges:
                             session = edge.get("node", {})
                             if session:
-                                # Add device context to session
-                                session["device_id"] = device_id
-                                session["device_name"] = device_name
-                                session["device_type"] = device_type
-                                all_sessions.append(session)
+                                all_sessions.append(
+                                    self._normalize_charging_session(
+                                        session,
+                                        device_id,
+                                        device_name,
+                                        device_type,
+                                    )
+                                )
 
                 return all_sessions
             elif "errors" in response:

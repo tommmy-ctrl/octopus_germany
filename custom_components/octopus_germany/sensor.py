@@ -378,6 +378,21 @@ async def async_setup_entry(
                                 )
                             )
                             entities.append(
+                                OctopusLastChargingProblemSensor(
+                                    acc_num, coordinator, device_id
+                                )
+                            )
+                            entities.append(
+                                OctopusChargingDiagnosticsSensor(
+                                    acc_num, coordinator, device_id
+                                )
+                            )
+                            entities.append(
+                                OctopusLatestDeviceAlertSensor(
+                                    acc_num, coordinator, device_id
+                                )
+                            )
+                            entities.append(
                                 OctopusTargetSocSensor(
                                     acc_num, coordinator, device_id
                                 )
@@ -2093,6 +2108,24 @@ class OctopusChargingDeviceSensor(CoordinatorEntity, SensorEntity):
             or session.get("device_name") == self._device_name
         ]
 
+    def _get_device_alerts(self) -> list[dict]:
+        """Return device alerts sorted with newest first."""
+        device = self._get_device_data() or {}
+        alerts = device.get("alerts") or []
+        valid_alerts = [alert for alert in alerts if isinstance(alert, dict)]
+        return sorted(
+            valid_alerts,
+            key=lambda alert: _parse_api_datetime(alert.get("publishedAt"))
+            or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+
+    def _get_device_status(self) -> dict[str, Any]:
+        """Return the current device status payload."""
+        device = self._get_device_data() or {}
+        status = device.get("status") or {}
+        return status if isinstance(status, dict) else {}
+
     def _get_last_session(self) -> dict | None:
         """Return the most recent charging session for this device."""
         sessions_with_start = [
@@ -2142,6 +2175,32 @@ class OctopusChargingDeviceSensor(CoordinatorEntity, SensorEntity):
         if not device:
             return None
         return _extract_device_schedule(device)
+
+    def _get_last_problem_details(self) -> dict[str, Any] | None:
+        """Return the most relevant problem details of the latest charging session."""
+        session = self._get_last_session()
+        if not session:
+            return None
+
+        if session.get("has_error"):
+            return {
+                "problem_type": "error",
+                "problem_value": session.get("error_cause"),
+                "session": session,
+            }
+
+        if session.get("has_truncation"):
+            return {
+                "problem_type": "truncation",
+                "problem_value": session.get("truncation_cause"),
+                "session": session,
+            }
+
+        return {
+            "problem_type": "none",
+            "problem_value": "none",
+            "session": session,
+        }
 
     @property
     def available(self) -> bool:
@@ -2306,7 +2365,191 @@ class OctopusLastChargingSessionCostSensor(OctopusChargingDeviceSensor):
             "session_type": session.get("type"),
             "energy_kwh": energy.get("value"),
             "energy_unit": energy.get("unit"),
+            "soc_change": session.get("state_of_charge_change"),
+            "soc_final": session.get("state_of_charge_final"),
+            "target_type": session.get("targetType"),
+            "dispatches_utilized": session.get("dispatches_utilized"),
+            "error_cause": session.get("error_cause"),
+            "truncation_cause": session.get("truncation_cause"),
             "cost_currency": cost.get("currency", "EUR"),
+        }
+
+
+class OctopusLastChargingProblemSensor(OctopusChargingDeviceSensor):
+    """Sensor for the most recent charging problem cause."""
+
+    def __init__(self, account_number, coordinator, device_id: str) -> None:
+        """Initialize the last charging problem sensor."""
+        super().__init__(account_number, coordinator, device_id)
+        self._attr_name = (
+            f"Octopus {account_number} {self._device_name} Last Charging Problem"
+        )
+        self._attr_unique_id = (
+            f"octopus_{account_number}_{self._norm_name}_last_charging_problem"
+        )
+        self._attr_icon = "mdi:alert-circle-outline"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the latest charging problem or 'none'."""
+        details = self._get_last_problem_details()
+        if not details:
+            return None
+        return details.get("problem_value")
+
+    @property
+    def extra_state_attributes(self) -> Dict[str, Any]:
+        """Return additional attributes."""
+        details = self._get_last_problem_details()
+        if not details:
+            return {
+                "device_id": self._device_id,
+                "device_name": self._device_name,
+                "account_number": self._account_number,
+            }
+
+        session = details.get("session") or {}
+        return {
+            "device_id": self._device_id,
+            "device_name": self._device_name,
+            "account_number": self._account_number,
+            "problem_type": details.get("problem_type"),
+            "session_start": session.get("start"),
+            "session_end": session.get("end"),
+            "session_type": session.get("type"),
+            "soc_final": session.get("state_of_charge_final"),
+            "achievable_soc": session.get("achievable_soc"),
+            "original_achievable_soc": session.get("original_achievable_soc"),
+            "dispatches_utilized": session.get("dispatches_utilized"),
+        }
+
+
+class OctopusChargingDiagnosticsSensor(OctopusChargingDeviceSensor):
+    """Combined diagnostic sensor for smart charging state and issues."""
+
+    def __init__(self, account_number, coordinator, device_id: str) -> None:
+        """Initialize the charging diagnostics sensor."""
+        super().__init__(account_number, coordinator, device_id)
+        self._attr_name = (
+            f"Octopus {account_number} {self._device_name} Charging Diagnostics"
+        )
+        self._attr_unique_id = (
+            f"octopus_{account_number}_{self._norm_name}_charging_diagnostics"
+        )
+        self._attr_icon = "mdi:car-electric"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the most relevant current diagnostic state."""
+        status = self._get_device_status()
+        details = self._get_last_problem_details()
+        alerts = self._get_device_alerts()
+
+        if details and details.get("problem_type") == "error":
+            return f"error:{details.get('problem_value')}"
+        if details and details.get("problem_type") == "truncation":
+            return f"truncation:{details.get('problem_value')}"
+        if alerts:
+            return "alert_active"
+        if status.get("isSuspended"):
+            return "suspended"
+
+        current_state = status.get("currentState")
+        if current_state:
+            return str(current_state).lower()
+
+        return "ok"
+
+    @property
+    def extra_state_attributes(self) -> Dict[str, Any]:
+        """Return combined diagnostics as attributes."""
+        device = self._get_device_data() or {}
+        status = self._get_device_status()
+        details = self._get_last_problem_details() or {}
+        session = details.get("session") or self._get_last_session() or {}
+        next_dispatch = self._get_next_dispatch() or {}
+        alerts = self._get_device_alerts()
+        latest_alert = alerts[0] if alerts else {}
+        schedule = self._get_target_schedule()
+        preferences = device.get("preferences", {})
+
+        return {
+            "device_id": self._device_id,
+            "device_name": self._device_name,
+            "account_number": self._account_number,
+            "provider": device.get("provider"),
+            "device_type": device.get("deviceType"),
+            "current_status": status.get("current"),
+            "current_state": status.get("currentState"),
+            "is_suspended": status.get("isSuspended"),
+            "latest_problem_type": details.get("problem_type"),
+            "latest_problem_value": details.get("problem_value"),
+            "latest_alert_message": latest_alert.get("message"),
+            "latest_alert_published_at": latest_alert.get("publishedAt"),
+            "alerts_count": len(alerts),
+            "last_session_start": session.get("start"),
+            "last_session_end": session.get("end"),
+            "last_session_type": session.get("type"),
+            "last_session_energy_kwh": (session.get("energyAdded") or {}).get(
+                "value"
+            ),
+            "last_session_cost_eur": (session.get("cost") or {}).get("amount"),
+            "last_session_soc_final": session.get("state_of_charge_final"),
+            "last_session_soc_change": session.get("state_of_charge_change"),
+            "dispatches_utilized": session.get("dispatches_utilized"),
+            "error_cause": session.get("error_cause"),
+            "truncation_cause": session.get("truncation_cause"),
+            "achievable_soc": session.get("achievable_soc"),
+            "original_achievable_soc": session.get("original_achievable_soc"),
+            "next_dispatch_start": next_dispatch.get("start"),
+            "next_dispatch_end": next_dispatch.get("end"),
+            "next_dispatch_type": next_dispatch.get("type"),
+            "next_dispatch_energy_kwh": next_dispatch.get("deltaKwh"),
+            "target_soc": schedule.get("max") if schedule else None,
+            "target_min_soc": schedule.get("min") if schedule else None,
+            "target_time": schedule.get("time") if schedule else None,
+            "target_day": schedule.get("dayOfWeek") if schedule else None,
+            "target_type": preferences.get("targetType"),
+            "preference_mode": preferences.get("mode"),
+            "preference_unit": preferences.get("unit"),
+            "grid_export": preferences.get("gridExport"),
+        }
+
+
+class OctopusLatestDeviceAlertSensor(OctopusChargingDeviceSensor):
+    """Sensor for the latest active device alert."""
+
+    def __init__(self, account_number, coordinator, device_id: str) -> None:
+        """Initialize the latest device alert sensor."""
+        super().__init__(account_number, coordinator, device_id)
+        self._attr_name = (
+            f"Octopus {account_number} {self._device_name} Latest Device Alert"
+        )
+        self._attr_unique_id = (
+            f"octopus_{account_number}_{self._norm_name}_latest_device_alert"
+        )
+        self._attr_icon = "mdi:message-alert-outline"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the latest device alert message."""
+        alerts = self._get_device_alerts()
+        if not alerts:
+            return None
+        return alerts[0].get("message")
+
+    @property
+    def extra_state_attributes(self) -> Dict[str, Any]:
+        """Return additional attributes."""
+        alerts = self._get_device_alerts()
+        latest_alert = alerts[0] if alerts else {}
+        return {
+            "device_id": self._device_id,
+            "device_name": self._device_name,
+            "account_number": self._account_number,
+            "alerts_count": len(alerts),
+            "published_at": latest_alert.get("publishedAt"),
+            "all_alerts": alerts,
         }
 
 
@@ -2539,6 +2782,12 @@ class OctopusDeviceStatusSensor(CoordinatorEntity, SensorEntity):
                 "batterySize", "Unknown"
             ),
             "is_suspended": device.get("status", {}).get("isSuspended", False),
+            "alerts": device.get("alerts", []),
+            "latest_alert_message": (
+                device.get("alerts", [{}])[0].get("message")
+                if device.get("alerts")
+                else None
+            ),
             "account_number": self._account_number,
             "last_updated": datetime.now().isoformat(),
         }
