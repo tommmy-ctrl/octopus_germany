@@ -2482,6 +2482,16 @@ class OctopusChargingDiagnosticsSensor(OctopusChargingDeviceSensor):
             "current_status": status.get("current"),
             "current_state": status.get("currentState"),
             "is_suspended": status.get("isSuspended"),
+            "test_dispatch_failure_reason": status.get("testDispatchFailureReason"),
+            "soc_limit_upper": (status.get("stateOfChargeLimit") or {}).get(
+                "upperSocLimit"
+            ),
+            "soc_limit_timestamp": (status.get("stateOfChargeLimit") or {}).get(
+                "timestamp"
+            ),
+            "soc_limit_violated": (status.get("stateOfChargeLimit") or {}).get(
+                "isLimitViolated"
+            ),
             "latest_problem_type": details.get("problem_type"),
             "latest_problem_value": details.get("problem_value"),
             "latest_alert_message": latest_alert.get("message"),
@@ -2782,6 +2792,18 @@ class OctopusDeviceStatusSensor(CoordinatorEntity, SensorEntity):
                 "batterySize", "Unknown"
             ),
             "is_suspended": device.get("status", {}).get("isSuspended", False),
+            "test_dispatch_failure_reason": device.get("status", {}).get(
+                "testDispatchFailureReason"
+            ),
+            "soc_limit_upper": (
+                device.get("status", {}).get("stateOfChargeLimit", {}) or {}
+            ).get("upperSocLimit"),
+            "soc_limit_timestamp": (
+                device.get("status", {}).get("stateOfChargeLimit", {}) or {}
+            ).get("timestamp"),
+            "soc_limit_violated": (
+                device.get("status", {}).get("stateOfChargeLimit", {}) or {}
+            ).get("isLimitViolated"),
             "alerts": device.get("alerts", []),
             "latest_alert_message": (
                 device.get("alerts", [{}])[0].get("message")

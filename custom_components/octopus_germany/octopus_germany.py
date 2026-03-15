@@ -187,6 +187,12 @@ query ComprehensiveDataQuery($accountNumber: String!) {
       current
       currentState
       isSuspended
+      testDispatchFailureReason
+      stateOfChargeLimit {
+        upperSocLimit
+        timestamp
+        isLimitViolated
+      }
     }
     provider
     preferences {
@@ -231,6 +237,12 @@ query ComprehensiveDataQuery($accountNumber: String!) {
         current
         currentState
         isSuspended
+        testDispatchFailureReason
+        stateOfChargeLimit {
+          upperSocLimit
+          timestamp
+          isLimitViolated
+        }
       }
       vehicleVariant {
         model
