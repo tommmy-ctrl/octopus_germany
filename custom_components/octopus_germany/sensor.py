@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
+from .entity_helpers import get_account_device_info
 from .sensor_ev import build_ev_entities
 from .sensor_meter import build_meter_entities
 from .sensor_tariff import build_tariff_entities
