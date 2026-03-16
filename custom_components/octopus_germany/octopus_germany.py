@@ -231,12 +231,6 @@ query ComprehensiveDataQuery($accountNumber: String!) {
         current
         currentState
         isSuspended
-        testDispatchFailureReason
-        stateOfChargeLimit {
-          upperSocLimit
-          timestamp
-          isLimitViolated
-        }
       }
       vehicleVariant {
         model
@@ -286,17 +280,6 @@ query ComprehensiveDataQuery($accountNumber: String!) {
       }
     }
     ... on SmartFlexChargePoint {
-      status {
-        current
-        currentState
-        isSuspended
-        testDispatchFailureReason
-        stateOfChargeLimit {
-          upperSocLimit
-          timestamp
-          isLimitViolated
-        }
-      }
       chargingSessions(first: 100) {
         edges {
           node {
