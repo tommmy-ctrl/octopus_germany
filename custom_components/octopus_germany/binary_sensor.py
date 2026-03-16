@@ -13,7 +13,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.util.dt import as_local, as_utc, parse_datetime, utcnow
 
 from .const import DOMAIN
-from .sensor import get_account_device_info
+from .entity_helpers import get_account_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -531,6 +531,4 @@ class OctopusIntelligentDispatchingBinarySensor(CoordinatorEntity, BinarySensorE
     @property
     def device_info(self) -> DeviceInfo:
         """Return device information for the Octopus account (service device)."""
-        from .sensor import get_account_device_info
-
         return get_account_device_info(self._account_number)

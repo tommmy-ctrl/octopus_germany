@@ -641,7 +641,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Register account service devices before setting up platforms
     from homeassistant.helpers import device_registry as dr
-    from .sensor import get_account_device_info
+    from .entity_helpers import get_account_device_info
 
     device_registry = dr.async_get(hass)
     for account_number in account_numbers:
