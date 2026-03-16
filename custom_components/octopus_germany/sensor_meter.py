@@ -25,15 +25,31 @@ _LOGGER = logging.getLogger(__name__)
 def build_meter_entities(account_number: str, coordinator, account_data: dict) -> list:
     """Build meter-, reading-, contract-, and device-related entities."""
     entities = []
+    smart_meter_readings_available = bool(
+        account_data.get("electricity_smart_meter_readings")
+    )
+    smart_meter_readings_known = (
+        account_data.get("electricity_smart_meter_readings_date") is not None
+    )
+    smart_meter_expected = bool(
+        (account_data.get("meter") or {}).get("shouldReceiveSmartMeterData")
+    )
 
     if account_data.get("malo_number"):
         if account_data.get("electricity_latest_reading"):
             entities.append(
                 OctopusElectricityLatestReadingSensor(account_number, coordinator)
             )
-        entities.append(
-            OctopusElectricitySmartMeterReadingsSensor(account_number, coordinator)
-        )
+        if (
+            smart_meter_readings_available
+            or smart_meter_readings_known
+            or smart_meter_expected
+        ):
+            entities.append(
+                OctopusElectricitySmartMeterReadingsSensor(
+                    account_number, coordinator
+                )
+            )
 
     if account_data.get("gas_malo_number"):
         entities.append(OctopusGasMaloSensor(account_number, coordinator))
@@ -302,14 +318,14 @@ class OctopusGasLatestReadingSensor(CoordinatorEntity, SensorEntity):
     def native_unit_of_measurement(self) -> str | None:
         """Return the unit of measurement."""
         # Since the GraphQL API doesn't provide units directly for gas readings,
-        # we default to mÂ³ which is the standard for gas consumption in Germany
-        return "mÂ³"
+        # we default to m3 which is the standard gas volume unit here.
+        return "m3"
 
     def _update_attributes(self) -> None:
         """Update the internal attributes dictionary."""
         default_attributes = {
             "reading_value": "Unknown",
-            "reading_units": "mÂ³",
+            "reading_units": "m3",
             "reading_date": "Unknown",
             "reading_origin": "Unknown",
             "reading_type": "Unknown",
@@ -347,7 +363,7 @@ class OctopusGasLatestReadingSensor(CoordinatorEntity, SensorEntity):
 
             self._attributes = {
                 "reading_value": gas_reading.get("value", "Unknown"),
-                "reading_units": "mÂ³",
+                "reading_units": "m3",
                 "reading_date": reading_date or "Unknown",
                 "reading_origin": gas_reading.get("origin", "Unknown"),
                 "reading_type": gas_reading.get("typeOfRead", "Unknown"),
@@ -546,9 +562,7 @@ class OctopusGasPriceSensor(CoordinatorEntity, SensorEntity):
         self._account_number = account_number
         self._attr_name = f"Octopus {account_number} Gas Price"
         self._attr_unique_id = f"octopus_{account_number}_gas_price"
-        self._attr_device_class = SensorDeviceClass.MONETARY
-        self._attr_native_unit_of_measurement = "â‚¬/kWh"
-        self._attr_state_class = SensorStateClass.TOTAL
+        self._attr_native_unit_of_measurement = "EUR/kWh"
         self._attr_has_entity_name = False
 
     @property

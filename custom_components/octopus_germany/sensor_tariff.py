@@ -9,7 +9,6 @@ from typing import Any, Dict
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
-    SensorStateClass,
 )
 from homeassistant.core import callback
 from homeassistant.helpers.entity import DeviceInfo
@@ -57,9 +56,7 @@ class OctopusElectricityPriceSensor(CoordinatorEntity, SensorEntity):
         self._account_number = account_number
         self._attr_name = f"Octopus {account_number} Electricity Price"
         self._attr_unique_id = f"octopus_{account_number}_electricity_price"
-        self._attr_device_class = SensorDeviceClass.MONETARY
-        self._attr_native_unit_of_measurement = "â‚¬/kWh"
-        self._attr_state_class = SensorStateClass.TOTAL
+        self._attr_native_unit_of_measurement = "EUR/kWh"
         self._attr_has_entity_name = False
         self._attributes = {}
 
@@ -444,7 +441,7 @@ class OctopusElectricityPriceSensor(CoordinatorEntity, SensorEntity):
             # Add electricity balance if available
             if "electricity_balance" in account_data:
                 product_attributes["electricity_balance"] = (
-                    f"{account_data['electricity_balance']:.2f} â‚¬"
+                    f"{account_data['electricity_balance']:.2f} EUR"
                 )
 
             # Add dual format rate data for compatibility
@@ -572,8 +569,7 @@ class OctopusGasBalanceSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = f"Octopus {account_number} Gas Balance"
         self._attr_unique_id = f"octopus_{account_number}_gas_balance"
         self._attr_device_class = SensorDeviceClass.MONETARY
-        self._attr_native_unit_of_measurement = "â‚¬"
-        self._attr_state_class = SensorStateClass.TOTAL
+        self._attr_native_unit_of_measurement = "EUR"
         self._attr_has_entity_name = False
 
     @property
@@ -616,8 +612,7 @@ class OctopusElectricityBalanceSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = f"Octopus {account_number} Electricity Balance"
         self._attr_unique_id = f"octopus_{account_number}_electricity_balance"
         self._attr_device_class = SensorDeviceClass.MONETARY
-        self._attr_native_unit_of_measurement = "â‚¬"
-        self._attr_state_class = SensorStateClass.TOTAL
+        self._attr_native_unit_of_measurement = "EUR"
         self._attr_has_entity_name = False
 
     @property
@@ -660,8 +655,7 @@ class OctopusHeatBalanceSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = f"Octopus {account_number} Heat Balance"
         self._attr_unique_id = f"octopus_{account_number}_heat_balance"
         self._attr_device_class = SensorDeviceClass.MONETARY
-        self._attr_native_unit_of_measurement = "â‚¬"
-        self._attr_state_class = SensorStateClass.TOTAL
+        self._attr_native_unit_of_measurement = "EUR"
         self._attr_has_entity_name = False
 
     @property
@@ -706,8 +700,7 @@ class OctopusLedgerBalanceSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = f"Octopus {account_number} {ledger_name} Balance"
         self._attr_unique_id = f"octopus_{account_number}_{ledger_type.lower()}_balance"
         self._attr_device_class = SensorDeviceClass.MONETARY
-        self._attr_native_unit_of_measurement = "â‚¬"
-        self._attr_state_class = SensorStateClass.TOTAL
+        self._attr_native_unit_of_measurement = "EUR"
         self._attr_has_entity_name = False
 
     @property
@@ -878,7 +871,7 @@ class OctopusGasTariffSensor(CoordinatorEntity, SensorEntity):
             # Add gas balance if available
             if "gas_balance" in account_data:
                 product_attributes["gas_balance"] = (
-                    f"{account_data['gas_balance']:.2f} â‚¬"
+                    f"{account_data['gas_balance']:.2f} EUR"
                 )
 
             self._attributes = product_attributes
