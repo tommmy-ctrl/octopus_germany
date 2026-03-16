@@ -13,7 +13,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-from homeassistant.util.dt import utcnow, as_utc, parse_datetime
 
 from .const import (
     CONF_DEBUG_MODE,
@@ -25,6 +24,15 @@ from .const import (
     DEFAULT_SMART_METER_PROBE,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
+)
+from .debug import log_account_debug_summary, log_debug_mode_info
+from .models.normalizers import (
+    calculate_days_until_iso_datetime,
+    calculate_dispatch_windows,
+    extract_vehicle_battery_size,
+    get_cached_account_data,
+    initialize_account_result,
+    is_currently_valid_product,
 )
 from .octopus_germany import OctopusGermany
 
@@ -190,6 +198,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             and hasattr(coordinator, "data")
             and coordinator.data
         ):
+            log_debug_mode_info(
+                _LOGGER,
+                debug_enabled,
+                "Coordinator throttled update; using cached data from %s after %.1f seconds",
+                async_update_data.last_api_call.strftime("%H:%M:%S"),
+                time_since_last_call,
+            )
             _LOGGER.debug(
                 "Throttling API call - returning cached data from %s",
                 async_update_data.last_api_call.strftime("%H:%M:%S"),
@@ -214,6 +229,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             account_data, account_num, api
                         )
                         all_accounts_data.update(processed_account_data)
+                        log_debug_mode_info(
+                            _LOGGER,
+                            debug_enabled,
+                            "Account %s refresh completed with %d top-level fields",
+                            account_num,
+                            len(processed_account_data.get(account_num, {})),
+                        )
                     else:
                         _LOGGER.warning(
                             "Failed to fetch data for account %s", account_num
@@ -239,6 +261,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 datetime.now().strftime("%H:%M:%S"),
                 len(all_accounts_data),
             )
+            log_debug_mode_info(
+                _LOGGER,
+                debug_enabled,
+                "Coordinator refresh succeeded for %d account(s) at %s",
+                len(all_accounts_data),
+                datetime.now().strftime("%H:%M:%S"),
+            )
             return all_accounts_data
 
         except Exception as e:
@@ -251,31 +280,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not data:
             return {}
 
-        # Initialize the data structure
-        result_data = {
-            account_number: {
-                "account_number": account_number,
-                "electricity_balance": 0,
-                "planned_dispatches": [],
-                "completed_dispatches": [],
-                "property_ids": [],
-                "devices": [],
-                "products": [],
-                "gas_products": [],
-                "vehicle_battery_size_in_kwh": None,
-                "current_start": None,
-                "current_end": None,
-                "next_start": None,
-                "next_end": None,
-                "ledgers": [],
-                "malo_number": None,
-                "melo_number": None,
-                "meter": None,
-                "gas_malo_number": None,
-                "gas_melo_number": None,
-                "gas_meter": None,
-            }
-        }
+        debug_enabled = bool(getattr(api, "_debug_enabled", False))
+
+        result_data = initialize_account_result(account_number)
 
         # Extract account data - this should be available even if device-related endpoints fail
         account_data = data.get("account", {})
@@ -419,38 +426,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         devices = data.get("devices", [])
         result_data[account_number]["devices"] = devices
 
-        # Extract vehicle battery size if available
-        vehicle_battery_size = None
-        for device in devices:
-            if device.get("vehicleVariant") and device["vehicleVariant"].get(
-                "batterySize"
-            ):
-                try:
-                    vehicle_battery_size = float(
-                        device["vehicleVariant"]["batterySize"]
-                    )
-                    break
-                except (ValueError, TypeError):
-                    pass
+        vehicle_battery_size = extract_vehicle_battery_size(devices)
         result_data[account_number]["vehicle_battery_size_in_kwh"] = (
             vehicle_battery_size
         )
 
         # Handle dispatch data if it exists
         # Try to fall back to cached data from coordinator if API omits the field
-        cached_account = {}
-        try:
-            cached_coordinator = (
-                hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("coordinator")
-            )
-            if cached_coordinator and cached_coordinator.data:
-                cached_account = cached_coordinator.data.get(account_number, {}) or {}
-        except Exception:
-            cached_account = {}
+        fallbacks_used = []
+        cached_account = get_cached_account_data(hass, entry, account_number)
 
         if "plannedDispatches" not in data:
             planned_dispatches = cached_account.get("planned_dispatches", [])
             if planned_dispatches:
+                fallbacks_used.append("planned_dispatches")
                 _LOGGER.debug(
                     "API missing plannedDispatches for %s, using cached data (%d dispatches)",
                     account_number,
@@ -467,34 +456,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             completed_dispatches = cached_account.get("completed_dispatches", [])
         result_data[account_number]["completed_dispatches"] = completed_dispatches
 
-        # Calculate current and next dispatches
-        now = utcnow()  # Use timezone-aware UTC now
-        current_start = None
-        current_end = None
-        next_start = None
-        next_end = None
-
-        for dispatch in sorted(planned_dispatches, key=lambda x: x.get("start", "")):
-            try:
-                # Convert string to timezone-aware datetime objects
-                start_str = dispatch.get("start")
-                end_str = dispatch.get("end")
-
-                if not start_str or not end_str:
-                    continue
-
-                # Parse string to datetime and ensure it's UTC timezone-aware
-                start = as_utc(parse_datetime(start_str))
-                end = as_utc(parse_datetime(end_str))
-
-                if start <= now <= end:
-                    current_start = start
-                    current_end = end
-                elif now < start and not next_start:
-                    next_start = start
-                    next_end = end
-            except (ValueError, TypeError) as e:
-                _LOGGER.error("Error parsing dispatch dates: %s - %s", dispatch, str(e))
+        current_start, current_end, next_start, next_end = (
+            calculate_dispatch_windows(planned_dispatches, _LOGGER)
+        )
 
         result_data[account_number]["current_start"] = current_start
         result_data[account_number]["current_end"] = current_end
@@ -740,6 +704,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGED_PRODUCT_WARNINGS.add(account_number)
             cached_products = cached_account.get("products", [])
             if cached_products:
+                fallbacks_used.append("products")
                 _LOGGER.debug(
                     "Using cached electricity products for account %s (%d entries)",
                     account_number,
@@ -921,13 +886,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             valid_gas_products = []
 
             for product in gas_products:
-                valid_from = product.get("validFrom")
-                valid_to = product.get("validTo")
-
-                if not valid_from:
-                    continue
-
-                if valid_from <= now and (not valid_to or now <= valid_to):
+                if is_currently_valid_product(product, now):
                     valid_gas_products.append(product)
 
             if valid_gas_products:
@@ -953,6 +912,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not gas_products:
             cached_gas_products = cached_account.get("gas_products", [])
             if cached_gas_products:
+                fallbacks_used.append("gas_products")
                 _LOGGER.debug(
                     "Using cached gas products for account %s (%d entries)",
                     account_number,
@@ -971,17 +931,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Calculate days until contract expiry
         gas_contract_days_until_expiry = None
         if gas_contract_end:
-            try:
-                end_date = datetime.fromisoformat(
-                    gas_contract_end.replace("Z", "+00:00")
+            gas_contract_days_until_expiry = calculate_days_until_iso_datetime(
+                gas_contract_end
+            )
+            if gas_contract_days_until_expiry is None:
+                _LOGGER.warning(
+                    "Error calculating gas contract expiry days: %s",
+                    gas_contract_end,
                 )
-                now_date = datetime.now(end_date.tzinfo)
-                days_diff = (end_date - now_date).days
-                gas_contract_days_until_expiry = max(
-                    0, days_diff
-                )  # Don't show negative days
-            except (ValueError, TypeError) as e:
-                _LOGGER.warning("Error calculating gas contract expiry days: %s", e)
 
         result_data[account_number]["gas_contract_days_until_expiry"] = (
             gas_contract_days_until_expiry
@@ -1029,6 +986,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 )
 
         if gas_latest_reading is None:
+            if cached_account.get("gas_latest_reading") is not None:
+                fallbacks_used.append("gas_latest_reading")
             gas_latest_reading = cached_account.get("gas_latest_reading")
         result_data[account_number]["gas_latest_reading"] = gas_latest_reading
 
@@ -1067,6 +1026,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 )
 
         if electricity_latest_reading is None:
+            if cached_account.get("electricity_latest_reading") is not None:
+                fallbacks_used.append("electricity_latest_reading")
             electricity_latest_reading = cached_account.get(
                 "electricity_latest_reading"
             )
@@ -1079,6 +1040,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "electricity_smart_meter_readings", []
         )
         if not electricity_smart_meter_readings:
+            if cached_account.get("electricity_smart_meter_readings"):
+                fallbacks_used.append("electricity_smart_meter_readings")
             electricity_smart_meter_readings = cached_account.get(
                 "electricity_smart_meter_readings", []
             )
@@ -1100,6 +1063,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 len(electricity_smart_meter_readings),
                 account_number,
             )
+
+        log_account_debug_summary(
+            _LOGGER,
+            debug_enabled,
+            account_number,
+            result_data[account_number],
+            fallbacks_used,
+        )
 
         return result_data
 

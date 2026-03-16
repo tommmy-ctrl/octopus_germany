@@ -1,5 +1,50 @@
 # Release Notes
 
+## Version 0.0.86 (2026-03-16)
+
+### Beta Focus
+
+- Runtime options are now configurable from the Home Assistant options dialog.
+- EV charging sensors and diagnostics were expanded for SmartFlex troubleshooting.
+- The integration was prepared for the next beta phase with safer internal refactoring.
+
+### New Features
+
+- Added runtime options for:
+  - polling interval
+  - smart meter probing
+  - extra debug diagnostics
+- Added EV charging sensors for:
+  - next dispatch start
+  - next dispatch energy
+  - last charging cost
+  - last charging problem
+  - charging diagnostics
+  - latest device alert
+  - target SOC
+  - target time
+
+### Improvements
+
+- Added cache fallbacks for tariff, reading, and smart meter data to reduce temporary `unknown` states.
+- Reduced noisy smart meter warning behavior when interval data is not available.
+- Expanded debug mode with request summaries, account summaries, and device/session diagnostics.
+- Fixed the Home Assistant options flow so runtime settings can be changed reliably.
+
+### Internal Refactor
+
+- Moved GraphQL query strings into `custom_components/octopus_germany/queries.py`.
+- Moved shared debug helpers into `custom_components/octopus_germany/debug.py`.
+- Started moving normalization logic into `custom_components/octopus_germany/models/normalizers.py`.
+- Split EV-specific helpers and sensors into:
+  - `custom_components/octopus_germany/entity_helpers.py`
+  - `custom_components/octopus_germany/sensor_ev.py`
+
+### Notes
+
+- This remains a beta-focused release intended for validation in real Home Assistant setups.
+- The new EV sensor split is intended to reduce risk for future changes, but should be treated as a structural beta step.
+
 ## Version 0.0.66 (2025-11-22)
 
 ### 🎉 New Features

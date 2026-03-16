@@ -459,7 +459,20 @@ automation:
 
 ## Debugging
 
-If you encounter issues, you can enable debug logging by adding the following to your `configuration.yaml`:
+The integration now exposes runtime options directly in Home Assistant:
+
+1. `Settings`
+2. `Devices & Services`
+3. `Octopus Energy Germany`
+4. `Configure`
+5. `Options`
+
+Available options:
+- `Polling interval in minutes`: Controls the regular coordinator refresh interval
+- `Fetch smart meter interval data during updates`: Enables or disables additional smart-meter interval queries
+- `Enable extra debug diagnostics`: Enables high-signal troubleshooting logs for API responses, cache fallback usage, dispatch/session summaries, and device smart-charging state
+
+If you want the normal Home Assistant `DEBUG` log lines in addition to the integration's debug-mode summaries, add the following to your `configuration.yaml`:
 
 ```yaml
 logger:
@@ -493,9 +506,15 @@ When reporting issues, please include:
 - Debug logs with sensitive information removed
 - Device type and model (if applicable)
 
+When `Enable extra debug diagnostics` is active, the integration logs additional `Info` lines prefixed with `Debug mode:`. These include:
+- GraphQL response summaries with `data_keys`, error count, error code, error path, and message
+- Coordinator refresh and throttling events
+- Per-account summaries for devices, dispatches, charging sessions, tariffs, smart-meter readings, and cache fallbacks
+- Per-device summaries for current state, suspension state, alerts, charging-session issues, and planned dispatch count
+
 ### API-Debug
 
-If you need more information for API debug set in const:
+If you need full raw API payloads beyond the runtime debug mode, set in const:
 
 `/config/custom_components/octopus_germany/const.py`
 

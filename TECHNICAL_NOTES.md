@@ -2,6 +2,8 @@
 
 ## Architecture Overview
 
+For planned refactoring and release sequencing while the integration remains beta, see [`ROADMAP_BETA.md`](./ROADMAP_BETA.md).
+
 ### Core Components
 - **Main Coordinator**: Central data coordinator using `DataUpdateCoordinator` with shared token management
 - **API Client** (`octopus_germany.py`): Handles GraphQL authentication, token refresh, and all API calls
@@ -119,6 +121,19 @@ Main Coordinator (DataUpdateCoordinator)
 5. **Error Resilience**: Network issues, API errors, malformed responses
 
 ##### Debug Settings
+Runtime options are available via the integration options dialog:
+- `update_interval`
+- `smart_meter_probe`
+- `debug_mode`
+
+The `debug_mode` option now emits additional `Info`-level diagnostics without requiring full raw API dumps. Current debug summaries include:
+- GraphQL response overview with `data_keys`, error count, error code, path, and message
+- Coordinator refresh and throttling decisions
+- Per-account summaries with dispatch/session/product/smart-meter counts
+- Explicit cache fallback reporting when last known values are reused
+- Per-device smart-charging summaries with `current`, `currentState`, `isSuspended`, alerts, and latest charging problem
+
+For standard Home Assistant `DEBUG` lines, keep the logger override below:
 ```yaml
 logger:
   logs:
@@ -129,7 +144,7 @@ logger:
 
 #### Performance Considerations
 
-- **Update Interval**: 1 minute (configurable)
+- **Update Interval**: 5 minutes by default (configurable)
 - **API Call Throttling**: Prevents excessive requests
 - **Cached Data Fallback**: Returns last known data on API failures
 - **Efficient GraphQL**: Single query fetches all account data
